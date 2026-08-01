@@ -1,0 +1,24 @@
+{
+  "name": "mermaid-machine",
+  "version": "0.1.0",
+  "description": "A concurrent state machine engine, compatible with mermaid notations",
+  "license": "Apache-2.0",
+  "author": "Pierre ARLAUD",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "test": "vitest",
+    "start": "tsc && node build/src/main"
+  },
+  "devDependencies": {
+    "@types/d3": "^7.4.3",
+    "@types/jsdom": "^28.0.3",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "jsdom": "^29.1.1",
+    "mermaid": "^10.9.6"
+  }
+}
