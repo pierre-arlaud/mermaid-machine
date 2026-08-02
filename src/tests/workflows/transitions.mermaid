@@ -1,0 +1,17 @@
+flowchart LR
+    HomePage((Home Page))
+    HomePage-->|Log in| LoginPage[Login Page]
+    HomePage-->|Subscribe| SubscriptionPage[Subscription Page]
+    HomePage-->|Go to Dashboard| LoginPage
+    SubscriptionPage --> Subscription(Subscription)
+    LoginPage --> Login(Log in)
+    LoginPage -->|Go back| SubscriptionPage
+    LoginPage -->|Go back| HomePage
+    
+    DashboardPage[DashboardPage]
+
+    Subscription --> LoginPage
+    Login --> DashboardPage
+    
+    DashboardPage -->|Log out| Logout
+    Logout(Logout) --> HomePage

@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 
 import { JSDOM } from 'jsdom';
 
-import { Node, NodeType, Transition, Workflow } from '../domain/workflow.js';
+import { ChartState, ChartTransition, ChartWorkflow, StateType } from '../domain/chart.js';
 
 interface FlowVertex {
     id: string;
@@ -28,21 +28,21 @@ export class MermaidParserService {
         return this.parseString(graph);
     }
 
-    async parseString (graph: string): Promise<Workflow> {
+    async parseString (graph: string): Promise<ChartWorkflow> {
         const db = await this.getFlowDb(graph);
 
         const vertices = db.getVertices();
-        const nodes: Record<string, Node> = {};
+        const states: Record<string, ChartState> = {};
         for (const id of Object.keys(vertices)) {
             const vertex = vertices[id];
-            nodes[id] = {
+            states[id] = {
                 id: vertex.id,
-                type: this.resolveNodeType(vertex),
+                type: this.resolveStateType(vertex),
                 ...(vertex.text && vertex.text !== vertex.id ? { label: vertex.text } : {})
             };
         }
 
-        const transitions: Record<string, Transition[]> = {};
+        const transitions: Record<string, ChartTransition[]> = {};
         for (const edge of db.getEdges()) {
             if (!transitions[edge.start]) {
                 transitions[edge.start] = [];
@@ -54,19 +54,19 @@ export class MermaidParserService {
             });
         }
 
-        const startNodes = Object.values(nodes)
-            .filter(node => node.type === 'start')
-            .map(node => node.id);
+        const startStates = Object.values(states)
+            .filter(state => state.type === 'start')
+            .map(state => state.id);
 
-        return { nodes, transitions, startNodes };
+        return { states, transitions, startStates };
     }
 
-    private resolveNodeType (vertex: FlowVertex): NodeType {
+    private resolveStateType (vertex: FlowVertex): StateType {
         switch (vertex.type) {
             case undefined: return 'manual'; // bare node, no shape declared
             case 'circle': return 'start';   // (( ))
-            case 'square': return 'auto';    // [ ]
-            case 'round': return 'manual';   // ( )
+            case 'square': return 'manual';  // [ ]
+            case 'round': return 'auto';     // ( )
             case 'diamond': return 'gate';   // { }
             case 'hexagon': return 'event';  // {{ }}
             default:
@@ -92,7 +92,7 @@ export class MermaidParserService {
         // `getDiagramFromText` calls .parse() internally
         const diagram = await mermaid.mermaidAPI.getDiagramFromText(graph);
         // so .db is fully populated here
-        return (diagram as any).db as FlowDb;
+        return diagram.db as unknown as FlowDb;
     }
 
 }

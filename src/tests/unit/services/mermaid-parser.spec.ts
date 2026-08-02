@@ -1,4 +1,5 @@
 import { MermaidParserService } from '../../../services/mermaid-parser.service.js';
+import '../../setup.js';
 
 describe('Mermaid Parser', () => {
 
@@ -24,7 +25,7 @@ describe('Mermaid Parser', () => {
         expect(chart.states.F.type).toBe('manual');
     });
 
-    it ('should parse transitions including in cases involving parallelism', async () => {
+    it('should parse transitions including in cases involving parallelism', async () => {
         const chart = await parseFile('parallelism');
 
         ['Start', 'Fork', 'Task', 'JobA', 'JobB', 'Join', 'Trigger'].forEach(id => {

@@ -1,19 +1,13 @@
-export type NodeType = 'start' | 'manual' | 'auto' | 'gate' | 'event';
+import { ChartWorkflow } from './chart.js';
+import { State } from './state.js';
 
-export interface Node {
-  id: string;
-  type: NodeType;
-  label?: string;
-}
+export class Workflow {
+    readonly states: Record<string, State>;
 
-export interface Transition {
-  from: string;
-  to: string;
-  label?: string;
-}
-
-export interface Workflow {
-  nodes: Record<string, Node>;
-  transitions: Record<string, Transition[]>;
-  startNodes: string[];
+    constructor(chart: ChartWorkflow) {
+        this.states = {};
+        for (const id of Object.keys(chart.states)) {
+            this.states[id] = new State(chart.states[id], chart.transitions[id] ?? []);
+        }
+    }
 }
