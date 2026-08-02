@@ -8,13 +8,16 @@
   "main": "main.js",
   "scripts": {
     "test": "vitest",
+    "lint": "eslint .",
     "start": "tsc && node build/src/main"
   },
   "devDependencies": {
     "@types/d3": "^7.4.3",
     "@types/jsdom": "^28.0.3",
     "@types/node": "^26.1.1",
-    "typescript": "^7.0.2",
+    "eslint": "^10.8.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10"
   },
   "dependencies": {
