@@ -2,6 +2,10 @@ import { Workflow } from '../../domain/workflow.js';
 import { MermaidParserService } from '../../services/mermaid-parser.service.js';
 import '../setup.js';
 
+interface TestDoc {
+    value?: number;
+}
+
 describe('Parsed workflow state transitions integration', () => {
 
     const parseFile = async (fileName: string) => {
@@ -11,7 +15,7 @@ describe('Parsed workflow state transitions integration', () => {
 
     it('should find a single transition when there is only one', async () => {
         const chart = await parseFile('transitions');
-        const workflow = new Workflow(chart);
+        const workflow = new Workflow<TestDoc>(chart);
 
         expect(workflow.states.DashboardPage.findTransition()).toBeDefined();
         expect(workflow.states.Logout.findTransition({})).toBeDefined();
@@ -23,7 +27,7 @@ describe('Parsed workflow state transitions integration', () => {
 
     it('should find all transitions', async () => {
         const chart = await parseFile('transitions');
-        const workflow = new Workflow(chart);
+        const workflow = new Workflow<TestDoc>(chart);
 
         expect(workflow.states.HomePage.findTransitions()).toHaveLength(3);
 

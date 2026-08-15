@@ -1,12 +1,12 @@
 flowchart LR
-    Start --> Fork{Fork}
+    Start(Start) --> Fork{Fork}
 
-    Fork --> Task
-    Fork --> JobA(Auto Job A)
-    JobA --> JobB(Auto Job B)
+    Fork --> Task(Task)
+    Fork --> JobA[Auto Job A]
+    JobA --> JobB[Auto Job B]
 
     Task --> Join{Join}
     JobB --> Join
 
-    Join --> End
+    Join --> End(End)
     Trigger{{ Full stop }} --> End

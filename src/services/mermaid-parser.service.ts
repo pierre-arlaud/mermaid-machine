@@ -54,19 +54,43 @@ export class MermaidParserService {
             });
         }
 
-        const startStates = Object.values(states)
+        const targeted = new Set(db.getEdges().map(edge => edge.end));
+        this.assertValidChart(states, targeted);
+
+        const declaredStartStateIds = Object.values(states)
             .filter(state => state.type === 'start')
             .map(state => state.id);
 
-        return { states, transitions, startStates };
+        const startStateIds = declaredStartStateIds.length > 0
+            ? declaredStartStateIds
+            : this.resolveSourceStates(states, targeted);
+
+        return { states, transitions, startStateIds };
+    }
+
+    private assertValidChart (states: Record<string, ChartState>, targeted: Set<string>): void {
+        for (const state of Object.values(states)) {
+            // Event states are only ever activated by an explicit trigger() call, never reached via a transition.
+            if (state.type === 'event' && targeted.has(state.id)) {
+                throw new Error(`Event state "${ state.id }" has an incoming edge; event states must have no inputs.`);
+            }
+        }
+    }
+
+    // Fallback when no state is explicitly declared start (([ ])): any state never targeted by an edge,
+    // excluding event and gate states, neither of which is allowed as a start state.
+    private resolveSourceStates (states: Record<string, ChartState>, targeted: Set<string>): string[] {
+        return Object.keys(states)
+            .filter(id => !targeted.has(id))
+            .filter(id => states[id].type !== 'event' && states[id].type !== 'gate');
     }
 
     private resolveStateType (vertex: FlowVertex): StateType {
         switch (vertex.type) {
-            case undefined: return 'manual'; // bare node, no shape declared
-            case 'circle': return 'start';   // (( ))
-            case 'square': return 'manual';  // [ ]
-            case 'round': return 'auto';     // ( )
+            case undefined: return 'auto';   // bare node, no shape declared
+            case 'stadium': return 'start';  // ([ ])
+            case 'square': return 'auto';    // [ ]
+            case 'round': return 'manual';   // ( )
             case 'diamond': return 'gate';   // { }
             case 'hexagon': return 'event';  // {{ }}
             default:

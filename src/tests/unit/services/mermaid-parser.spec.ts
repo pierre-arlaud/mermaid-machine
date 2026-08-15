@@ -9,7 +9,7 @@ describe('Mermaid Parser', () => {
     };
 
     it('should parse all supported node types', async () => {
-        const chart = await parseFile('nodes-types');
+        const chart = await parseFile('state-types');
 
         ['A', 'B', 'C', 'D', 'E'].forEach(id => {
             expect(chart.states[id]).toBeDefined();
@@ -46,6 +46,34 @@ describe('Mermaid Parser', () => {
 
         expect(chart.states.End).toBeDefined();
         expect(chart.transitions.End ?? []).toHaveLength(0);
+    });
+
+    it('should treat states with no inputs as start states by default', async () => {
+        const chartNone = await parseFile('start-states-none');
+        const chartOne = await parseFile('start-states-one');
+
+        expect(chartNone.startStateIds).toEqual(['DoorA', 'DoorB']);
+        expect(chartOne.startStateIds).toEqual(['DoorC']);
+    });
+
+    it('should exclude event states from the default start-state fallback', async () => {
+        const parser = new MermaidParserService();
+        const chart = await parser.parseString(`
+            flowchart LR
+                A --> B
+                Evt{{Full stop}} --> B
+        `);
+
+        expect(chart.startStateIds).toEqual(['A']);
+    });
+
+    it('should reject an event state that has an incoming edge', async () => {
+        const parser = new MermaidParserService();
+
+        await expect(parser.parseString(`
+            flowchart LR
+                A --> Evt{{Full stop}}
+        `)).rejects.toThrow();
     });
 
 });

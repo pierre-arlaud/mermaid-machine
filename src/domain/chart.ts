@@ -15,5 +15,5 @@ export interface ChartTransition {
 export interface ChartWorkflow {
     states: Record<string, ChartState>;
     transitions: Record<string, ChartTransition[]>;
-    startStates: string[];
+    startStateIds: string[];
 }
