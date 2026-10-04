@@ -1,5 +1,4 @@
 import { MermaidParserService } from '../../../services/mermaid-parser.service.js';
-import '../../setup.js';
 
 describe('Mermaid Parser', () => {
 

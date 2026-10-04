@@ -1,6 +1,5 @@
 import { Workflow } from '../../domain/workflow.js';
 import { MermaidParserService } from '../../services/mermaid-parser.service.js';
-import '../setup.js';
 
 interface TestDoc {
     value?: number;
