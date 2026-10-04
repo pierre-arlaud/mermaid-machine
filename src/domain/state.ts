@@ -32,6 +32,10 @@ export class State<Document> {
         this._transitions = outgoing.map(t => new Transition<Document>(t));
     }
 
+    /**
+     * This state's own retry limit set via `onCheckResult` options, or undefined to fall back to the Instance-level default.
+     * @internal Read by WorkflowEngine only.
+     */
     get retryLimit(): number | undefined {
         return this._retryLimit;
     }
@@ -72,20 +76,39 @@ export class State<Document> {
         return this;
     }
 
+    /**
+     * Tells whether a token may enter this state.
+     * @returns Whether a token may enter this state, i.e. the `onCheckBefore` predicate's result, or true when none is set.
+     * @internal Called by WorkflowEngine only.
+     */
     async checkBefore(context: CheckContext<Document>): Promise<boolean> {
         return this._onCheckBefore ? await this._onCheckBefore(context) : true;
     }
 
+    /**
+     * Runs the `onRun` handler, if any.
+     * @internal Called by WorkflowEngine only.
+     */
     async run(context: RunContext<Document>): Promise<void> {
         if (this._onRun) {
             await this._onRun(context);
         }
     }
 
+    /**
+     * Tells whether the last run succeeded.
+     * @returns Whether the last run succeeded, i.e. the `onCheckResult` predicate's result, or true when none is set.
+     * @internal Called by WorkflowEngine only.
+     */
     async checkResult(context: CheckContext<Document>): Promise<boolean> {
         return this._onCheckResult ? await this._onCheckResult(context) : true;
     }
 
+    /**
+     * Tells whether an `onCheckResult` predicate is set.
+     * @returns Whether an `onCheckResult` predicate is set.
+     * @internal Called by WorkflowEngine only.
+     */
     hasCheckResult(): boolean {
         return this._onCheckResult !== undefined;
     }

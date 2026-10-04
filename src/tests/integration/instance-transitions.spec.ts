@@ -20,14 +20,14 @@ describe('Transitions', () => {
         const instance = workflow.instantiate({});
         await instance.start('HomePage');
 
-        const atLoginPage = instance.activeTokens().filter(token => token.stateId === 'LoginPage');
+        const atLoginPage = instance.activeTokensAt('LoginPage');
         expect(atLoginPage).toHaveLength(2);
         expect(instance.isActive('SubscriptionPage')).toBe(true);
 
         // Each arrival at LoginPage is independently triggerable
         await instance.advanceManualToken(atLoginPage[0].tokenId, { to: 'Login' });
 
-        expect(instance.activeTokens().filter(token => token.stateId === 'LoginPage')).toHaveLength(1);
+        expect(instance.activeTokensAt('LoginPage')).toHaveLength(1);
         expect(instance.isActive('DashboardPage')).toBe(true);
     });
 

@@ -7,9 +7,12 @@ import type { Workflow } from './workflow.js';
 export interface HistoryEntry {
     readonly tokenId: number;
     readonly stateId: string;
-    readonly enteredAt: Date;
-    readonly outcome: 'ran' | 'completed' | 'failed';
+    /** When this entry was written. */
+    readonly recordedAt: Date;
+    readonly outcome: 'run' | 'completed' | 'failed' | 'merged';
     readonly error?: unknown;
+    /** For a `'merged'` entry, the id of the token created on the gate from this and the other consumed tokens. */
+    readonly mergedInto?: number;
 }
 
 export class InstanceFailureError extends Error {
@@ -27,10 +30,16 @@ export class InstanceFailureError extends Error {
 export interface Token {
     readonly tokenId: number;
     stateId: string;
-    status: 'running' | 'waiting';
+    /**
+     * `'joining'` marks a token sitting at a gate until every one of the gate's inputs has delivered a token.
+     * `'failed'` marks a token left at the state where it failed, see `error`.
+     */
+    status: 'running' | 'waiting' | 'joining' | 'failed';
+    /** For a `'failed'` token, what caused the failure. */
+    error?: unknown;
     /**
      * A FIFO number to ensure tokens who have waited the longest are chosen first.
-     * Set by `holdToken` on arrival at a waiting state, -1 for a token that has never waited.
+     * Set on arrival at a manual state (`holdToken`) or at a gate (`holdAtGate`), -1 for a token that has never waited.
      */
     waitSequence: number;
 }
@@ -45,8 +54,8 @@ export class WorkflowEngine<Document> {
     private readonly _tokens = new Map<number, Token>();
     private _nextSequence = 0;
 
-    private readonly _gateArrivals = new Map<string, Set<Transition<Document>>>();
-    private readonly _openedGates = new Set<string>();
+    // The input transition each joining token arrived through, keyed by tokenId.
+    private readonly _joinTransitions = new Map<number, Transition<Document>>();
 
     private readonly _history: HistoryEntry[] = [];
 
@@ -62,8 +71,12 @@ export class WorkflowEngine<Document> {
         return this._history;
     }
 
-    get isComplete(): boolean {
+    get isCompleted(): boolean {
         return this._initialized && this._tokens.size === 0;
+    }
+
+    get hasFailures(): boolean {
+        return [...this._tokens.values()].some(token => token.status === 'failed');
     }
 
     activeTokens(): Readonly<Token>[] {
@@ -71,9 +84,9 @@ export class WorkflowEngine<Document> {
     }
 
     /**
-     * Begins execution at the given state, or at the workflow's sole declared start state if
-     * omitted. An explicit stateId must itself be a declared start state; use `triggerState` to
-     * begin execution elsewhere. Must be called exactly once.
+     * Begins execution at the given state, or at the workflow's sole declared start state if omitted.
+     * An explicit stateId must itself be a declared start state; event states are activated with `triggerState` instead.
+     * Must be called exactly once.
      * @throws {InstanceFailureError} If any token in the initial cascade failed.
      */
     async start(stateId?: string): Promise<void> {
@@ -89,12 +102,26 @@ export class WorkflowEngine<Document> {
         await this.executeCascade(context => this.enterState(token, context));
     }
 
-    /** Creates a new token on the given event state and runs a fresh cascade; repeatable by design. */
+    /**
+     * Creates a new token on the given event state and runs a fresh cascade; repeatable by design while the instance is in progress.
+     * @throws {InstanceFailureError} If any token in that cascade failed.
+     */
     async triggerState(stateId: string): Promise<void> {
-        const state = this._workflow.states[stateId];
-        if (!state) throw new Error(`Workflow has no state "${ stateId }".`);
-        if (state.type !== 'event') throw new Error(`State "${ stateId }" is "${ state.type }", not "event".`);
-        await this.executeCascade(context => this.enterState(this.createToken(stateId), context));
+        this.assertEventState(stateId);
+        if (!this._initialized) throw new Error(`Cannot trigger "${ stateId }": the instance has not started.`);
+        if (this.isCompleted) throw new Error(`Cannot trigger "${ stateId }": the instance has completed; use reopenWithTrigger() instead.`);
+        await this.runEvent(stateId);
+    }
+
+    /**
+     * Reopens a completed instance by triggering the given event state.
+     * @throws {InstanceFailureError} If any token in that cascade failed.
+     */
+    async reopenWithTrigger(stateId: string): Promise<void> {
+        this.assertEventState(stateId);
+        if (!this._initialized) throw new Error(`Cannot reopen at "${ stateId }": the instance has not started.`);
+        if (!this.isCompleted) throw new Error(`Cannot reopen at "${ stateId }": the instance is still in progress.`);
+        await this.runEvent(stateId);
     }
 
     /**
@@ -135,7 +162,7 @@ export class WorkflowEngine<Document> {
                 // Reached a state with no output: workflow has completed.
                 await this.executeCascade(context => doAdvance(context, () => this.completeToken(token)));
             } else {
-                // Find a valid transition and cross it
+                // Find a valid transition and cross it.
                 const transition = state.findTransition(selector);
                 if (!await transition.checkBefore(this._instance)) {
                     throw new Error(`Transition from "${ state.id }" to "${ transition.to }" is not eligible.`);
@@ -148,12 +175,22 @@ export class WorkflowEngine<Document> {
             }
         } catch (error) {
             // Validation failed before commit: leave the token waiting so the caller can retry.
-            // A committed failure already deleted the token via failToken, so this is a no-op then.
-            if (this._tokens.has(token.tokenId)) {
+            // After commit, the token is no longer running (failed, held further on, or gone), so this is a no-op then.
+            if (this._tokens.has(token.tokenId) && token.status === 'running') {
                 token.status = 'waiting';
             }
             throw error;
         }
+    }
+
+    private assertEventState(stateId: string): void {
+        const state = this._workflow.states[stateId];
+        if (!state) throw new Error(`Workflow has no state "${ stateId }".`);
+        if (state.type !== 'event') throw new Error(`State "${ stateId }" is "${ state.type }", not "event".`);
+    }
+
+    private async runEvent(stateId: string): Promise<void> {
+        await this.executeCascade(context => this.enterState(this.createToken(stateId), context));
     }
 
     private resolveDefaultStart(): string {
@@ -190,7 +227,7 @@ export class WorkflowEngine<Document> {
         if (!state) throw new Error(`Workflow has no state "${ stateId }".`);
         if (state.type !== 'manual') throw new Error(`State "${ stateId }" is "${ state.type }", not "manual".`);
 
-        // Find the token that’s been waiting the longest on the given state
+        // Find the token that's been waiting the longest on the given state.
         const waiting = [...this._tokens.values()]
             .filter(token => token.stateId === stateId && token.status === 'waiting')
             .sort((a, b) => a.waitSequence - b.waitSequence);
@@ -218,7 +255,7 @@ export class WorkflowEngine<Document> {
         for (let attempts = 1; attempts <= limit; attempts++) {
             await state.run(this._instance);
             if (!state.hasCheckResult() || await state.checkResult(this._instance)) {
-                this._history.push({ tokenId: token.tokenId, stateId: state.id, enteredAt: new Date(), outcome: 'ran' });
+                this._history.push({ tokenId: token.tokenId, stateId: state.id, recordedAt: new Date(), outcome: 'run' });
                 return;
             }
         }
@@ -257,57 +294,74 @@ export class WorkflowEngine<Document> {
     private async crossTransition(sourceToken: Token, transition: Transition<Document>, isFork: boolean, context: ExecutionContext): Promise<void> {
         const target = this._workflow.states[transition.to];
 
-        // A single eligible transition into a non-gate target is a plain continuation, not a fork or a join:
-        // the token keeps its identity instead of being replaced by a new one.
-        if (!isFork && target.type !== 'gate') {
+        // Each fork branch gets its own token; a single eligible transition is a plain continuation that keeps the token's identity.
+        let token = sourceToken;
+        if (isFork) {
+            this._tokens.delete(sourceToken.tokenId);
+            token = this.createToken(target.id);
+        } else {
             sourceToken.stateId = target.id;
-            await this.enterState(sourceToken, context);
-            return;
         }
 
-        this._tokens.delete(sourceToken.tokenId);
         if (target.type === 'gate') {
-            const opened = this.tryOpenGate(target.id, transition);
-            if (!opened) {
+            this.holdAtGate(token, transition);
+            const merged = this.tryMergeAt(target.id);
+            if (!merged) {
                 return;
             }
+            token = merged;
         }
-        const newToken = this.createToken(target.id);
-        await this.enterState(newToken, context);
+        await this.enterState(token, context);
     }
 
     /**
-     * Records this transition's arrival at the given gate.
-     * @returns True on the arrival that completes the gate's quorum (the caller should proceed only then), false otherwise, including for a later arrival at an already-opened gate.
+     * Merges the tokens joining at the given gate into one new token, if every input transition has delivered one.
+     * MUST stay synchronous: JS's run-to-completion makes this operation (check then consume) atomic across concurrently-progressing fork branches.
+     * @returns The merged token, created on the gate and not yet entered, or undefined if some input has no joining token yet (the joining tokens are then left untouched).
      */
-    // MUST stay synchronous: JS's run-to-completion makes this check-then-mark atomic across concurrently-progressing fork branches.
-    private tryOpenGate(stateId: string, transition: Transition<Document>): boolean {
-        if (this._openedGates.has(stateId)) return false;
+    private tryMergeAt(stateId: string): Token | undefined {
+        const joining = [...this._tokens.values()]
+            .filter(token => token.stateId === stateId && token.status === 'joining')
+            .sort((a, b) => a.waitSequence - b.waitSequence);
 
-        const arrived = this._gateArrivals.get(stateId) ?? new Set<Transition<Document>>();
-        arrived.add(transition);
-        this._gateArrivals.set(stateId, arrived);
+        // The oldest joining token per input; extra arrivals on an input stay for a later round.
+        const consumed: Token[] = [];
+        for (const input of this._workflow.findInputTransitions(stateId)) {
+            const token = joining.find(candidate => this._joinTransitions.get(candidate.tokenId) === input);
+            if (!token) return undefined;
+            consumed.push(token);
+        }
 
-        if (arrived.size < this._workflow.findInputTransitions(stateId).length) return false;
-
-        this._openedGates.add(stateId);
-        return true;
+        const merged = this.createToken(stateId);
+        for (const token of consumed) {
+            this._tokens.delete(token.tokenId);
+            this._joinTransitions.delete(token.tokenId);
+            this._history.push({ tokenId: token.tokenId, stateId, recordedAt: new Date(), outcome: 'merged', mergedInto: merged.tokenId });
+        }
+        return merged;
     }
 
     private completeToken(token: Token): void {
         this._tokens.delete(token.tokenId);
-        this._history.push({ tokenId: token.tokenId, stateId: token.stateId, enteredAt: new Date(), outcome: 'completed' });
+        this._history.push({ tokenId: token.tokenId, stateId: token.stateId, recordedAt: new Date(), outcome: 'completed' });
     }
 
     private failToken(token: Token, error: unknown, context: ExecutionContext): void {
-        this._tokens.delete(token.tokenId);
+        token.status = 'failed';
+        token.error = error;
         context.errors.push(error);
-        this._history.push({ tokenId: token.tokenId, stateId: token.stateId, enteredAt: new Date(), outcome: 'failed', error });
+        this._history.push({ tokenId: token.tokenId, stateId: token.stateId, recordedAt: new Date(), outcome: 'failed', error });
     }
 
     private holdToken(token: Token): void {
         token.status = 'waiting';
         token.waitSequence = this._nextSequence++;
+    }
+
+    private holdAtGate(token: Token, transition: Transition<Document>): void {
+        token.status = 'joining';
+        token.waitSequence = this._nextSequence++;
+        this._joinTransitions.set(token.tokenId, transition);
     }
 
 }

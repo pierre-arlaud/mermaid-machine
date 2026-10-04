@@ -15,8 +15,8 @@ export interface InstanceOptions {
 }
 
 /**
- * A live execution of a Workflow: identity + public API. All token bookkeeping, state-running,
- * and transition-crossing logic lives in WorkflowEngine, which Instance delegates to exclusively.
+ * A live execution of a Workflow: identity + public API. 
+ * All token bookkeeping, state-running, and transition-crossing logic lives in WorkflowEngine, which Instance delegates to exclusively.
  */
 export class Instance<Document> implements RunContext<Document> {
 
@@ -37,13 +37,26 @@ export class Instance<Document> implements RunContext<Document> {
         return this._engine.history;
     }
 
-    /** No tokens left anywhere: every branch reached a true sink state. */
-    get isComplete(): boolean {
-        return this._engine.isComplete;
+    /** Whether this instance has completed, i.e. no tokens are left anywhere and every branch reached a true sink state. */
+    get isCompleted(): boolean {
+        return this._engine.isCompleted;
+    }
+
+    /** Whether any token has failed, and so is left at the state where it failed, keeping this instance from completing. */
+    get hasFailures(): boolean {
+        return this._engine.hasFailures;
     }
 
     activeTokens(): Readonly<Token>[] {
         return this._engine.activeTokens();
+    }
+
+    /**
+     * Lists the tokens currently at the given state.
+     * @returns The tokens at the given state, whatever their status, or an empty array if there are none or the state does not exist.
+     */
+    activeTokensAt(stateId: string): Readonly<Token>[] {
+        return this.activeTokens().filter(token => token.stateId === stateId);
     }
 
     activeStateIds(): string[] {
@@ -55,9 +68,9 @@ export class Instance<Document> implements RunContext<Document> {
     }
 
     /**
-     * Begins this instance's execution at the given state, or at the workflow's sole declared
-     * start state if omitted. An explicit stateId must itself be a declared start state; use
-     * `triggerState` to begin execution elsewhere. Must be called exactly once.
+     * Begins this instance's execution at the given state, or at the workflow's sole declared start state if omitted.
+     * An explicit stateId must itself be a declared start state; event states are activated with `triggerState` instead.
+     * Must be called exactly once.
      * @throws {InstanceFailureError} If any token in the initial cascade failed.
      */
     async start(stateId?: string): Promise<void> {
@@ -66,10 +79,19 @@ export class Instance<Document> implements RunContext<Document> {
 
     /**
      * Runs a fresh cascade for this event state.
+     * Only allowed while this instance is in progress, i.e. after `start` and before it completes; use `reopenWithTrigger` on a completed instance.
      * @throws {InstanceFailureError} If any token in that cascade failed.
      */
     async triggerState(stateId: string): Promise<void> {
         await this._engine.triggerState(stateId);
+    }
+
+    /**
+     * Reopens this completed instance by running a fresh cascade for this event state.
+     * @throws {InstanceFailureError} If any token in that cascade failed.
+     */
+    async reopenWithTrigger(stateId: string): Promise<void> {
+        await this._engine.reopenWithTrigger(stateId);
     }
 
     /**

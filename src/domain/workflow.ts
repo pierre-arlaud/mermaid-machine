@@ -16,11 +16,20 @@ export class Workflow<Document> {
         this.startStateIds = chart.startStateIds;
     }
 
-    /** Constructs a new Instance of this workflow. Call `start()` on the instance to begin execution. */
+    /**
+     * Constructs a new Instance of this workflow.
+     * Call `start()` on the instance to begin execution.
+     * @returns The new, not yet started Instance.
+     */
     instantiate(document: Document, options?: InstanceOptions): Instance<Document> {
         return new Instance(this, document, options);
     }
 
+    /**
+     * Finds the transitions leading into the given state.
+     * @returns Every state's outgoing transitions whose target is the given state, as the same instances `State.findTransitions` returns.
+     * @internal Called by WorkflowEngine only.
+     */
     findInputTransitions(stateId: string): Transition<Document>[] {
         return Object.values(this.states)
             .flatMap(state => state.findTransitions())

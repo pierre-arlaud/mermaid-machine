@@ -20,7 +20,11 @@ export class Transition<Document> {
         return this;
     }
 
-    // Used internally by Instance; defaults to eligible when no predicate is set.
+    /**
+     * Tells whether this transition may be crossed.
+     * @returns Whether this transition may be crossed, i.e. the `onCheckBefore` predicate's result, or true when none is set.
+     * @internal Called by WorkflowEngine only.
+     */
     async checkBefore(context: CheckContext<Document>): Promise<boolean> {
         return this._onCheckBefore ? await this._onCheckBefore(context) : true;
     }
