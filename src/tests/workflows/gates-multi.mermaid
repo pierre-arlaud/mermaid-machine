@@ -1,0 +1,8 @@
+flowchart LR
+    Start([Start]) --> Fork{Fork}
+    Fork --> A
+    Fork --> B
+    A --> Multi{Multi}
+    B --> Multi{Multi}
+    Multi --> C
+    Multi --> D

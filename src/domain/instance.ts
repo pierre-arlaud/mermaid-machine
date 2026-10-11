@@ -3,15 +3,32 @@ import type { TransitionSelector } from './state.js';
 import type { Workflow } from './workflow.js';
 import type { HistoryEntry, Token } from './workflow-engine.js';
 import { WorkflowEngine, InstanceFailureError } from './workflow-engine.js';
+import { assertTimeout } from '../utils/timeout.js';
 
 export type { HistoryEntry, Token };
 export { InstanceFailureError };
 
 const DEFAULT_RETRY_LIMIT = 5;
+const DEFAULT_CASCADE_VISIT_LIMIT = 1000;
+const DEFAULT_HANDLER_TIMEOUT = 30_000;
 
 export interface InstanceOptions {
-    /** Max total onRun invocations per state (including the first) before throwing. Default 5. */
+    /**
+     * Max total `onRun` invocations per state (including the first) before throwing.
+     * @defaultValue 5
+     */
     defaultRetryLimit?: number;
+    /**
+     * Max times a single state may be entered within one cascade, i.e. without stopping at a manual state or a gate.
+     * The token entering it once more fails instead, as the workflow is then assumed to loop forever.
+     * @defaultValue 1000
+     */
+    cascadeVisitLimit?: number;
+    /**
+     * Max time in milliseconds a handler may take before its attempt fails, unless the handler sets its own timeout; 0 disables it.
+     * @defaultValue 30000
+     */
+    defaultHandlerTimeout?: number;
 }
 
 /**
@@ -22,15 +39,28 @@ export class Instance<Document> implements RunContext<Document> {
 
     readonly document: Document;
     readonly workflow: Workflow<Document>;
-    readonly defaultRetryLimit: number;
+    /** The options this instance runs with, every unset one resolved to its default. */
+    readonly options: Readonly<Required<InstanceOptions>>;
 
     private readonly _engine: WorkflowEngine<Document>;
 
     constructor(workflow: Workflow<Document>, document: Document, options?: InstanceOptions) {
         this.workflow = workflow;
         this.document = document;
-        this.defaultRetryLimit = options?.defaultRetryLimit ?? DEFAULT_RETRY_LIMIT;
-        this._engine = new WorkflowEngine<Document>(this, workflow, this.defaultRetryLimit);
+
+        // Options are resolved one by one rather than spread over the defaults.
+        // That way, an option passed as undefined still gets its default.
+        this.options = {
+            defaultRetryLimit: options?.defaultRetryLimit ?? DEFAULT_RETRY_LIMIT,
+            cascadeVisitLimit: options?.cascadeVisitLimit ?? DEFAULT_CASCADE_VISIT_LIMIT,
+            defaultHandlerTimeout: options?.defaultHandlerTimeout ?? DEFAULT_HANDLER_TIMEOUT
+        };
+        assertTimeout(this.options.defaultHandlerTimeout, 'defaultHandlerTimeout');
+        for (const name of ['defaultRetryLimit', 'cascadeVisitLimit'] as const) {
+            const value = this.options[name];
+            if (!Number.isInteger(value) || value < 1) throw new RangeError(`${ name } must be a positive integer; got ${ value }.`);
+        }
+        this._engine = new WorkflowEngine<Document>(this, workflow, this.options);
     }
 
     get history(): readonly HistoryEntry[] {
@@ -69,8 +99,11 @@ export class Instance<Document> implements RunContext<Document> {
 
     /**
      * Begins this instance's execution at the given state, or at the workflow's sole declared start state if omitted.
-     * An explicit stateId must itself be a declared start state; event states are activated with `triggerState` instead.
+     * An explicit stateId must itself be a declared start state; event states are activated with `triggerState()` instead.
      * Must be called exactly once.
+     * @throws {Error} If this instance has already started.
+     * @throws {Error} If the given state does not exist or is not a declared start state.
+     * @throws {Error} If no state is given and the workflow does not have exactly one start state.
      * @throws {InstanceFailureError} If any token in the initial cascade failed.
      */
     async start(stateId?: string): Promise<void> {
@@ -79,7 +112,9 @@ export class Instance<Document> implements RunContext<Document> {
 
     /**
      * Runs a fresh cascade for this event state.
-     * Only allowed while this instance is in progress, i.e. after `start` and before it completes; use `reopenWithTrigger` on a completed instance.
+     * Only allowed while this instance is in progress, i.e. after `start()` and before it completes.
+     * Use `reopenWithTrigger()` on a completed instance.
+     * @throws {Error} If the state does not exist or is not an event state, or if this instance has not started or has completed.
      * @throws {InstanceFailureError} If any token in that cascade failed.
      */
     async triggerState(stateId: string): Promise<void> {
@@ -88,6 +123,7 @@ export class Instance<Document> implements RunContext<Document> {
 
     /**
      * Reopens this completed instance by running a fresh cascade for this event state.
+     * @throws {Error} If the state does not exist or is not an event state, or if this instance has not started or is still in progress.
      * @throws {InstanceFailureError} If any token in that cascade failed.
      */
     async reopenWithTrigger(stateId: string): Promise<void> {
@@ -95,19 +131,29 @@ export class Instance<Document> implements RunContext<Document> {
     }
 
     /**
-     * Resolves the oldest token waiting at this state (FIFO) and runs it.
+     * Advances the oldest token waiting at this state (FIFO) through the selected transition.
+     * The `onRun` handler was already invoked when the token arrived.
+     * A call rejected with an `Error` leaves the token waiting.
+     * @throws {Error} If the state does not exist, is not a manual state or has no waiting token.
+     * @throws {Error} If the selector does not match exactly one transition.
+     * @throws {Error} If that transition or its target state is not eligible, or one of their checks throws or times out.
      * @throws {InstanceFailureError} If any token in the resulting cascade failed.
      */
-    async advanceManualTokenAt(stateId: string, selector: TransitionSelector = {}): Promise<void> {
-        await this._engine.advanceManualTokenAt(stateId, selector);
+    async advanceManualStateTokenAt(stateId: string, selector: TransitionSelector = {}): Promise<void> {
+        await this._engine.advanceManualStateTokenAt(stateId, selector);
     }
 
     /**
-     * Runs a specific waiting token.
+     * Advances a specific waiting token through the selected transition.
+     * The `onRun` handler was already invoked when the token arrived.
+     * A call rejected with an `Error` leaves the token waiting.
+     * @throws {Error} If the token is not waiting.
+     * @throws {Error} If the selector does not match exactly one transition.
+     * @throws {Error} If that transition or its target state is not eligible, or one of their checks throws or times out.
      * @throws {InstanceFailureError} If any token in the resulting cascade failed.
      */
-    async advanceManualToken(tokenId: number, selector: TransitionSelector = {}): Promise<void> {
-        await this._engine.advanceManualToken(tokenId, selector);
+    async advanceManualStateToken(tokenId: number, selector: TransitionSelector = {}): Promise<void> {
+        await this._engine.advanceManualStateToken(tokenId, selector);
     }
 
 }

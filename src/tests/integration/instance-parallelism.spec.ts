@@ -12,18 +12,18 @@ describe('Parallelism', () => {
 
         const instance = workflow.instantiate(undefined);
         await instance.start('Start');
-        await instance.advanceManualTokenAt('Start');
+        await instance.advanceManualStateTokenAt('Start');
 
         // The JobA -> JobB branch has already auto-cascaded, and its token waits at Join for the Task branch.
         expect(instance.activeStateIds().sort()).toEqual(['Join', 'Task']);
         expect(instance.activeTokensAt('Join')).toEqual([expect.objectContaining({ status: 'joining' })]);
 
-        await instance.advanceManualTokenAt('Task');
+        await instance.advanceManualStateTokenAt('Task');
 
         expect(onJoinRun).toHaveBeenCalledTimes(1);
         expect(instance.activeStateIds()).toEqual(['End']);
 
-        await instance.advanceManualTokenAt('End');
+        await instance.advanceManualStateTokenAt('End');
         expect(instance.isCompleted).toBe(true);
     });
 
@@ -36,7 +36,7 @@ describe('Parallelism', () => {
 
         const instance = workflow.instantiate(undefined);
         await instance.start('Start');
-        await instance.advanceManualTokenAt('Start');
+        await instance.advanceManualStateTokenAt('Start');
 
         expect(instance.activeStateIds().sort()).toEqual(['Join', 'Task']);
 
@@ -47,15 +47,15 @@ describe('Parallelism', () => {
         expect(instance.isCompleted).toBe(false);
 
         // End is manual, not a gate, so Trigger's arrival and Join's (later) arrival are resolved separately.
-        await instance.advanceManualTokenAt('End');
+        await instance.advanceManualStateTokenAt('End');
         expect(instance.activeStateIds().sort()).toEqual(['Join', 'Task']);
         expect(instance.isCompleted).toBe(false);
 
-        await instance.advanceManualTokenAt('Task');
+        await instance.advanceManualStateTokenAt('Task');
         expect(onJoinRun).toHaveBeenCalledTimes(1);
         expect(instance.activeStateIds()).toEqual(['End']);
 
-        await instance.advanceManualTokenAt('End');
+        await instance.advanceManualStateTokenAt('End');
         expect(instance.isCompleted).toBe(true);
     });
 

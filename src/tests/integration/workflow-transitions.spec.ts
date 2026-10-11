@@ -5,7 +5,7 @@ interface TestDoc {
     value?: number;
 }
 
-describe('Parsed workflow state transitions integration', () => {
+describe('Workflow transitions', () => {
 
     const parseFile = async (fileName: string) => {
         const parser = new MermaidParserService();

@@ -1,5 +1,6 @@
 flowchart LR
-    HomePage([Home Page])
+    RootPath([ Root path ]) --> HomePage
+    HomePage(Home page)
     HomePage-->|Log in| LoginPage(Login Page)
     HomePage-->|Subscribe| SubscriptionPage(Subscription Page)
     HomePage-->|Go to Dashboard| LoginPage

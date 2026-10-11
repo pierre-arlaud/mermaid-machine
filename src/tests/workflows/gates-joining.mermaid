@@ -1,0 +1,7 @@
+flowchart LR
+    Start([Start]) --> Fork{Fork}
+    Fork --> Join{Join}
+    Fork --> B[B]
+    Fork --> C(C)
+    B --> Join
+    C --> Join

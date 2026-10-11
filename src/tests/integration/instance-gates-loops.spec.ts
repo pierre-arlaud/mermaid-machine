@@ -5,12 +5,12 @@ describe('Gate loops', () => {
 
     it('waits for event triggers at gates', async () => {
         const parser = new MermaidParserService();
-        const chart = await parser.parseFile('src/tests/workflows/gate-loops.mermaid');
+        const chart = await parser.parseFile('src/tests/workflows/gates-loops.mermaid');
         const workflow = new Workflow<{ counter: number }>(chart);
         
         const instance = workflow.instantiate({ counter: 0 });
         await instance.start();
-        await instance.advanceManualTokenAt('Start');
+        await instance.advanceManualStateTokenAt('Start');
         
         // Token should get stuck on the gate until event
         expect(instance.activeTokens()).toHaveLength(1);
@@ -22,7 +22,7 @@ describe('Gate loops', () => {
         expect(instance.activeStateIds()).toEqual(['Buffer']);
 
         // It should loop back to the gate, with one token on the well
-        await instance.advanceManualTokenAt('Buffer');
+        await instance.advanceManualStateTokenAt('Buffer');
         expect(instance.activeTokensAt('Well')).toHaveLength(1);
         expect(instance.activeStateIds().includes('Gate')).toBe(true);
 
@@ -33,7 +33,7 @@ describe('Gate loops', () => {
         expect(instance.activeStateIds().includes('Buffer')).toBe(true); // from second time opening the gate
 
         // After passing the buffer a second time, the well should have two tokens
-        await instance.advanceManualTokenAt('Buffer');
+        await instance.advanceManualStateTokenAt('Buffer');
         expect(instance.activeTokens()).toHaveLength(3);
         expect(instance.activeTokensAt('Well')).toHaveLength(2);
         expect(instance.activeStateIds()).toHaveLength(2);

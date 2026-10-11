@@ -92,7 +92,7 @@ export class MermaidParserService {
 
     private assertValidChart (states: Record<string, ChartState>, targeted: Set<string>): void {
         for (const state of Object.values(states)) {
-            // Event states are only ever activated by an explicit triggerState() call, never reached via a transition.
+            // Event states are only ever activated by an explicit `triggerState()` call, never reached via a transition.
             if (state.type === 'event' && targeted.has(state.id)) {
                 throw new Error(`Event state "${ state.id }" has an incoming edge; event states must have no inputs.`);
             }
@@ -108,6 +108,7 @@ export class MermaidParserService {
     }
 
     private resolveStateType (vertex: FlowVertex): StateType {
+        // See comment above StateType declaration for rationale.
         switch (vertex.type) {
             case undefined: return 'auto';   // bare node, no shape declared
             case 'stadium': return 'start';  // ([ ])
@@ -126,7 +127,7 @@ export class MermaidParserService {
     private async getFlowDb (graph: string): Promise<FlowDb> {
         const mermaid = await MermaidParserService.loadMermaid();
 
-        // `getDiagramFromText` calls .parse() internally, so .db is fully populated here.
+        // `getDiagramFromText()` calls `.parse()` internally, so `.db` is fully populated here.
         const diagram = await mermaid.mermaidAPI.getDiagramFromText(graph);
         return diagram.db as unknown as FlowDb;
     }

@@ -1,9 +1,9 @@
 flowchart LR
-    Start(Start) --> Wait[Waiting Room]
-    Wait --> Gate{Join Gate}
+    Start(Start) --> Entrance[Entrance Room]
+    Entrance --> Gate{Join Gate}
     Ready{{Ready trigger}} --> Gate
     Gate --> Buffer(Buffer)
     Buffer --> Loop{Loop Gate}
     Loop --> Well(End well)
-    Loop --> Wait
+    Loop --> Entrance
     Well --> End

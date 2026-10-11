@@ -1,0 +1,7 @@
+flowchart LR
+    Start --> Split{Split}
+    Split --> TwoSteps(TwoSteps)
+    Split --> TwoSteps
+    TwoSteps -->|StepA| Join{Join}
+    TwoSteps -->|StepB| Join
+    Join --> End

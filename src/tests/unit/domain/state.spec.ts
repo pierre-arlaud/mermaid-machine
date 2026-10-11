@@ -63,18 +63,19 @@ describe('State', () => {
         it('invokes the registered `onRun` handler with the given context', async () => {
             const state = new State<TestDoc>({ id: 'A', type: 'auto' }, []);
             const context = { document: { value: 1 } };
+            const signal = new AbortController().signal;
             const handler = vi.fn();
             state.onRun(handler);
 
-            await state.run(context);
+            await state.run(context, signal);
 
-            expect(handler).toHaveBeenCalledWith(context);
+            expect(handler).toHaveBeenCalledWith(context, signal);
         });
 
-        it('is a no-op when no onRun handler is registered', async () => {
+        it('is a no-op when no `onRun` handler is registered', async () => {
             const state = new State<TestDoc>({ id: 'A', type: 'auto' }, []);
 
-            await expect(state.run({ document: {} })).resolves.toBeUndefined();
+            await expect(state.run({ document: {} }, new AbortController().signal)).resolves.toBeUndefined();
         });
 
     });
@@ -85,7 +86,7 @@ describe('State', () => {
             const state = new State<TestDoc>({ id: 'A', type: 'auto' }, []);
 
             expect(state.hasCheckResult()).toBe(false);
-            expect(await state.checkResult({ document: {} })).toBe(true);
+            expect(await state.checkResult({ document: {} }, new AbortController().signal)).toBe(true);
         });
 
         it('reports it has a check result handler once it’s been registered', () => {
@@ -98,11 +99,12 @@ describe('State', () => {
         it('invokes the registered `onCheckResult` with the given context', async () => {
             const state = new State<TestDoc>({ id: 'A', type: 'auto' }, []);
             const context = { document: { value: 1 } };
-            const predicate = vi.fn().mockReturnValue(true);
-            state.onCheckResult(predicate);
+            const signal = new AbortController().signal;
+            const check = vi.fn().mockReturnValue(true);
+            state.onCheckResult(check);
 
-            expect(await state.checkResult(context)).toBe(true);
-            expect(predicate).toHaveBeenCalledWith(context);
+            expect(await state.checkResult(context, signal)).toBe(true);
+            expect(check).toHaveBeenCalledWith(context, signal);
         });
 
     });
@@ -115,11 +117,38 @@ describe('State', () => {
             expect(state.retryLimit).toBeUndefined();
         });
 
-        it('reflects the override passed to `onCheckResult`', () => {
+        it('reflects the override passed to `onRun`', () => {
             const state = new State<TestDoc>({ id: 'A', type: 'auto' }, []);
-            state.onCheckResult(() => true, { retries: 2 });
+            state.onRun(() => {}, { retries: 2 });
 
             expect(state.retryLimit).toBe(2);
+        });
+
+        it.each([0, -1, 1.5, NaN, Infinity])('rejects %s as a retry limit', retries => {
+            const state = new State<TestDoc>({ id: 'A', type: 'auto' }, []);
+
+            expect(() => state.onRun(() => {}, { retries })).toThrow(RangeError);
+            expect(state.retryLimit).toBeUndefined();
+        });
+
+    });
+
+    describe('setting a timeout', () => {
+
+        it('rejects an invalid timeout on every handler, without registering the handler', () => {
+            const state = new State<TestDoc>({ id: 'A', type: 'auto' }, []);
+
+            expect(() => state.onCheckBefore(() => true, { timeout: -1 })).toThrow(RangeError);
+            expect(() => state.onRun(() => {}, { timeout: NaN })).toThrow(RangeError);
+            expect(() => state.onCheckResult(() => true, { timeout: 2 ** 31 })).toThrow(RangeError);
+            expect(state.hasCheckResult()).toBe(false);
+        });
+
+        it('accepts 0 as no timeout', () => {
+            const state = new State<TestDoc>({ id: 'A', type: 'auto' }, []);
+            state.onRun(() => {}, { timeout: 0 });
+
+            expect(state.runTimeout).toBe(0);
         });
 
     });

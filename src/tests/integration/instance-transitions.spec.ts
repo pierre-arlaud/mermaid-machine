@@ -17,17 +17,20 @@ describe('Transitions', () => {
         const workflow = await parseWorkflow();
 
         const instance = workflow.instantiate({});
-        await instance.start('HomePage');
+        await instance.start();
+        expect(instance.activeStateIds()).toEqual(['HomePage']);
 
-        const atLoginPage = instance.activeTokensAt('LoginPage');
-        expect(atLoginPage).toHaveLength(2);
-        expect(instance.isActive('SubscriptionPage')).toBe(true);
+        // LoginPage holds the token as soon as it arrives through either of its incoming edges, where a gate would wait for all of them
+        await instance.advanceManualStateTokenAt('HomePage', { label: 'Log in' });
+        expect(instance.activeTokensAt('LoginPage')).toMatchObject([{ status: 'waiting' }]);
 
-        // Each arrival at LoginPage is independently triggerable
-        await instance.advanceManualToken(atLoginPage[0].tokenId, { to: 'Login' });
+        // Both "Go back" transitions share a label, so the target disambiguates
+        await instance.advanceManualStateTokenAt('LoginPage', { to: 'HomePage' });
+        await instance.advanceManualStateTokenAt('HomePage', { label: 'Go to Dashboard' });
+        expect(instance.activeTokensAt('LoginPage')).toMatchObject([{ status: 'waiting' }]);
 
-        expect(instance.activeTokensAt('LoginPage')).toHaveLength(1);
-        expect(instance.isActive('DashboardPage')).toBe(true);
+        await instance.advanceManualStateTokenAt('LoginPage', { to: 'Login' });
+        expect(instance.activeStateIds()).toEqual(['DashboardPage']);
     });
 
 });

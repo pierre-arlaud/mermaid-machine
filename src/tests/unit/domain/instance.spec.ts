@@ -215,7 +215,7 @@ describe('Instance', () => {
             await expect(instance.start('A')).rejects.toThrow();
         });
 
-        it('never runs onCheckBefore on the state it is directly instantiated on', async () => {
+        it('never runs `onCheckBefore` on the state it is directly instantiated on', async () => {
             const checkBefore = vi.fn().mockReturnValue(true);
             const workflow = buildSingleStateWorkflow('start');
             workflow.states.A.onCheckBefore(checkBefore);
@@ -239,7 +239,7 @@ describe('Instance', () => {
             expect(instance.activeStateIds()).toEqual(['B']);
         });
 
-        it('does not run implicit start manual states automatically', async () => {
+        it('runs implicit start manual states on arrival, then holds the token', async () => {
             const onRun = vi.fn();
             const workflow = buildLinearWorkflow('manual', 'manual');
             workflow.states.A.onRun(onRun);
@@ -248,8 +248,8 @@ describe('Instance', () => {
 
             await instance.start('A');
 
-            expect(onRun).not.toHaveBeenCalled();
-            expect(instance.activeStateIds()).toEqual(['A']);
+            expect(onRun).toHaveBeenCalledTimes(1);
+            expect(instance.activeTokens()).toEqual([expect.objectContaining({ stateId: 'A', status: 'waiting' })]);
         });
 
         it('completes without throwing when a state has no outgoing transitions at all', async () => {
@@ -265,20 +265,32 @@ describe('Instance', () => {
 
     describe('manual states', () => {
 
-        it('does not run a manual state until advanceManualTokenAt() is called', async () => {
+        it('runs a manual state on arrival, and not again when advancing it', async () => {
             const onRun = vi.fn();
             const workflow = buildSingleStateWorkflow('manual');
             workflow.states.A.onRun(onRun);
             const instance = workflow.instantiate({});
 
             await instance.start('A');
-            expect(onRun).not.toHaveBeenCalled();
+            expect(onRun).toHaveBeenCalledTimes(1);
 
-            await instance.advanceManualTokenAt('A');
+            await instance.advanceManualStateTokenAt('A');
             expect(onRun).toHaveBeenCalledTimes(1);
         });
 
-        it('rejects triggerState() on a manual state', async () => {
+        it('runs the outgoing checks after the `onRun` handler of the manual state', async () => {
+            const workflow = buildLinearWorkflow('manual', 'manual');
+            workflow.states.A.onRun(context => { context.document.value = 1; });
+            workflow.states.A.findTransition().onCheckBefore(context => context.document.value === 1);
+            const instance = workflow.instantiate({});
+
+            await instance.start('A');
+            await instance.advanceManualStateTokenAt('A');
+
+            expect(instance.activeStateIds()).toEqual(['B']);
+        });
+
+        it('rejects `triggerState()` on a manual state', async () => {
             const workflow = buildSingleStateWorkflow('manual');
             const instance = workflow.instantiate({});
             await instance.start('A');
@@ -293,13 +305,13 @@ describe('Instance', () => {
             const instance = workflow.instantiate({});
 
             await instance.start('A');
-            await instance.advanceManualTokenAt('A');
+            await instance.advanceManualStateTokenAt('A');
 
             expect(onRun).toHaveBeenCalledTimes(1);
             expect(instance.isCompleted).toBe(true);
         });
 
-        it('leaves a vetoed advanceManualTokenAt() waiting and retriable', async () => {
+        it('leaves a vetoed `advanceManualStateTokenAt()` waiting and retriable', async () => {
             const workflow = buildLinearWorkflow('manual', 'manual');
             let allowed = false;
             workflow.states.A.findTransition().onCheckBefore(() => allowed);
@@ -307,16 +319,16 @@ describe('Instance', () => {
 
             await instance.start('A');
 
-            await expect(instance.advanceManualTokenAt('A')).rejects.toThrow();
+            await expect(instance.advanceManualStateTokenAt('A')).rejects.toThrow();
             expect(instance.isActive('A')).toBe(true);
 
             allowed = true;
-            await instance.advanceManualTokenAt('A');
+            await instance.advanceManualStateTokenAt('A');
 
             expect(instance.activeStateIds()).toEqual(['B']);
         });
 
-        it('resolves the oldest waiting token first via advanceManualTokenAt(stateId), FIFO', async () => {
+        it('resolves the oldest waiting token first via advanceManualStateTokenAt(stateId), FIFO', async () => {
             const workflow = new Workflow<TestDoc>({
                 states: {
                     Begin: { id: 'Begin', type: 'auto' },
@@ -344,12 +356,12 @@ describe('Instance', () => {
             expect(waitingAtM).toHaveLength(2);
             const [, newerId] = waitingAtM;
 
-            await instance.advanceManualTokenAt('M');
+            await instance.advanceManualStateTokenAt('M');
 
             expect(instance.activeTokensAt('M').map(token => token.tokenId))
                 .toEqual([newerId]);
 
-            await instance.advanceManualToken(newerId);
+            await instance.advanceManualStateToken(newerId);
             expect(instance.isCompleted).toBe(true);
         });
 
@@ -379,7 +391,7 @@ describe('Instance', () => {
             expect(onRun).toHaveBeenCalledTimes(1);
         });
 
-        it('creates an independent token on each triggerState() call, repeatably', async () => {
+        it('creates an independent token on each `triggerState()` call, repeatably', async () => {
             const onRun = vi.fn();
             const workflow = buildEventWorkflow();
             workflow.states.Evt.onRun(onRun);
@@ -393,15 +405,15 @@ describe('Instance', () => {
             expect(instance.activeTokensAt('B')).toHaveLength(2);
         });
 
-        it('rejects advanceManualTokenAt() on an event state', async () => {
+        it('rejects `advanceManualStateTokenAt()` on an event state', async () => {
             const workflow = buildEventWorkflow();
             const instance = workflow.instantiate({});
             await instance.start('A');
 
-            await expect(instance.advanceManualTokenAt('Evt')).rejects.toThrow();
+            await expect(instance.advanceManualStateTokenAt('Evt')).rejects.toThrow();
         });
 
-        it('rejects triggerState() before the instance has started', async () => {
+        it('rejects `triggerState()` before the instance has started', async () => {
             const onRun = vi.fn();
             const workflow = buildEventWorkflow();
             workflow.states.Evt.onRun(onRun);
@@ -411,11 +423,11 @@ describe('Instance', () => {
             expect(onRun).not.toHaveBeenCalled();
         });
 
-        it('rejects triggerState() on a completed instance, pointing to reopenWithTrigger()', async () => {
+        it('rejects `triggerState()` on a completed instance, pointing to `reopenWithTrigger()`', async () => {
             const workflow = buildEventWorkflow();
             const instance = workflow.instantiate({});
             await instance.start('A');
-            await instance.advanceManualTokenAt('A');
+            await instance.advanceManualStateTokenAt('A');
             expect(instance.isCompleted).toBe(true);
 
             await expect(instance.triggerState('Evt')).rejects.toThrow('reopenWithTrigger()');
@@ -430,7 +442,7 @@ describe('Instance', () => {
             const workflow = buildEventWorkflow();
             const instance = workflow.instantiate({});
             await instance.start('A');
-            await instance.advanceManualTokenAt('A');
+            await instance.advanceManualStateTokenAt('A');
 
             await instance.reopenWithTrigger('Evt');
 
@@ -439,12 +451,12 @@ describe('Instance', () => {
 
             // Once reopened, the instance runs like any other, so it can complete again and accepts triggers meanwhile.
             await instance.triggerState('Evt');
-            await instance.advanceManualTokenAt('B');
-            await instance.advanceManualTokenAt('B');
+            await instance.advanceManualStateTokenAt('B');
+            await instance.advanceManualStateTokenAt('B');
             expect(instance.isCompleted).toBe(true);
         });
 
-        it('rejects reopenWithTrigger() on an instance still in progress', async () => {
+        it('rejects `reopenWithTrigger()` on an instance still in progress', async () => {
             const workflow = buildEventWorkflow();
             const instance = workflow.instantiate({});
             await instance.start('A');
@@ -452,18 +464,18 @@ describe('Instance', () => {
             await expect(instance.reopenWithTrigger('Evt')).rejects.toThrow('still in progress');
         });
 
-        it('rejects reopenWithTrigger() before the instance has started', async () => {
+        it('rejects `reopenWithTrigger()` before the instance has started', async () => {
             const workflow = buildEventWorkflow();
             const instance = workflow.instantiate({});
 
             await expect(instance.reopenWithTrigger('Evt')).rejects.toThrow('has not started');
         });
 
-        it('rejects reopenWithTrigger() on a non-event state', async () => {
+        it('rejects `reopenWithTrigger()` on a non-event state', async () => {
             const workflow = buildEventWorkflow();
             const instance = workflow.instantiate({});
             await instance.start('A');
-            await instance.advanceManualTokenAt('A');
+            await instance.advanceManualStateTokenAt('A');
 
             await expect(instance.reopenWithTrigger('B')).rejects.toThrow('not "event"');
             expect(instance.isCompleted).toBe(true);
@@ -493,11 +505,11 @@ describe('Instance', () => {
 
             await instance.start('Begin');
 
-            await instance.advanceManualTokenAt('B');
+            await instance.advanceManualStateTokenAt('B');
             expect(onRun).not.toHaveBeenCalled();
             expect(instance.activeTokensAt('Join').filter(token => token.status === 'joining')).toHaveLength(1);
 
-            await instance.advanceManualTokenAt('C');
+            await instance.advanceManualStateTokenAt('C');
             expect(onRun).toHaveBeenCalledTimes(1);
             expect(instance.isCompleted).toBe(true);
         });
@@ -508,8 +520,8 @@ describe('Instance', () => {
 
             await instance.start('Begin');
             const branchTokenIds = instance.activeTokens().map(token => token.tokenId);
-            await instance.advanceManualTokenAt('B');
-            await instance.advanceManualTokenAt('C');
+            await instance.advanceManualStateTokenAt('B');
+            await instance.advanceManualStateTokenAt('C');
 
             // Fork is a single-input gate, so Begin's token was merged there too; only Join's merges matter here.
             const merges = instance.history.filter(entry => entry.outcome === 'merged' && entry.stateId === 'Join');
@@ -542,7 +554,9 @@ describe('Instance', () => {
             workflow.states.G.onRun(onRun);
             const instance = workflow.instantiate({});
             const joiningAtG = (): Readonly<Token>[] => instance.activeTokensAt('G').filter(token => token.status === 'joining');
-            const mergedAtG = (): number[] => instance.history.filter(entry => entry.stateId === 'G' && entry.outcome === 'merged').map(entry => entry.tokenId);
+            const mergedAtG = (): number[] => instance.history
+                .filter(entry => entry.stateId === 'G' && entry.outcome === 'merged')
+                .map(entry => entry.tokenId);
 
             // Both event tokens queue on E's input while W's input has not delivered yet.
             await instance.start('W');
@@ -553,12 +567,12 @@ describe('Instance', () => {
             expect(onRun).not.toHaveBeenCalled();
 
             // W's arrival opens the gate with the oldest event token; the newest waits for the next round.
-            await instance.advanceManualTokenAt('W');
+            await instance.advanceManualStateTokenAt('W');
             expect(onRun).toHaveBeenCalledTimes(1);
             expect(mergedAtG()).toContain(oldest);
             expect(joiningAtG().map(token => token.tokenId)).toEqual([newest]);
 
-            await instance.advanceManualTokenAt('W');
+            await instance.advanceManualStateTokenAt('W');
             expect(onRun).toHaveBeenCalledTimes(2);
             expect(mergedAtG()).toContain(newest);
             expect(instance.activeStateIds()).toEqual(['W']);
@@ -568,7 +582,7 @@ describe('Instance', () => {
 
     describe('crossing transitions', () => {
 
-        it('excludes a transition based on its onCheckBefore', async () => {
+        it('excludes a transition based on its `onCheckBefore`', async () => {
             const workflow = buildChoiceWorkflow();
             workflow.states.A.findTransition({ to: 'B' }).onCheckBefore(() => false);
             const instance = workflow.instantiate({});
@@ -578,8 +592,9 @@ describe('Instance', () => {
             expect(instance.activeStateIds()).toEqual(['C']);
         });
 
-        it('excludes a transition based on the target state\'s onCheckBefore', async () => {
+        it('excludes a transition based on the target state\'s `onCheckBefore`', async () => {
             const workflow = buildChoiceWorkflow();
+            workflow.states.A.findTransition({ to: 'B' }).onCheckBefore(() => true);
             workflow.states.B.onCheckBefore(() => false);
             const instance = workflow.instantiate({});
 
@@ -639,9 +654,9 @@ describe('Instance', () => {
             workflow.states.C.onRun(() => { throw new Error('boom'); });
             const instance = workflow.instantiate({});
 
-            await instance.start('Begin');
-            await instance.advanceManualTokenAt('B');
-            await expect(instance.advanceManualTokenAt('C')).rejects.toThrow(InstanceFailureError);
+            // C runs on arrival, so its failure surfaces from `start()` while B's token waits.
+            await expect(instance.start('Begin')).rejects.toThrow(InstanceFailureError);
+            await instance.advanceManualStateTokenAt('B');
 
             const statuses = instance.activeTokens().map(token => `${ token.stateId }:${ token.status }`);
             expect(statuses.sort()).toEqual(['C:failed', 'Join:joining']);
@@ -654,11 +669,32 @@ describe('Instance', () => {
             workflow.states.A.onRun(() => { throw new Error('boom'); });
             const instance = workflow.instantiate({});
 
-            await instance.start('A');
-            await expect(instance.advanceManualTokenAt('A')).rejects.toThrow(InstanceFailureError);
+            await expect(instance.start('A')).rejects.toThrow(InstanceFailureError);
 
             expect(instance.activeTokens()).toEqual([expect.objectContaining({ stateId: 'A', status: 'failed' })]);
-            await expect(instance.advanceManualTokenAt('A')).rejects.toThrow('No token is currently waiting');
+            await expect(instance.advanceManualStateTokenAt('A')).rejects.toThrow('No token is currently waiting');
+        });
+
+        it('fails the token at the state it leaves when a check throws during a cascade', async () => {
+            const error = new Error('boom');
+            const workflow = buildLinearWorkflow('auto', 'auto');
+            workflow.states.A.findTransition().onCheckBefore(() => { throw error; });
+            const instance = workflow.instantiate({});
+
+            await expect(instance.start('A')).rejects.toThrow(InstanceFailureError);
+
+            expect(instance.activeTokens()).toEqual([expect.objectContaining({ stateId: 'A', status: 'failed', error })]);
+        });
+
+        it('leaves the token waiting when a check throws on advancing a manual state', async () => {
+            const workflow = buildLinearWorkflow('manual', 'auto');
+            workflow.states.B.onCheckBefore(() => { throw new Error('boom'); });
+            const instance = workflow.instantiate({});
+
+            await instance.start('A');
+            await expect(instance.advanceManualStateTokenAt('A')).rejects.toThrow('boom');
+
+            expect(instance.activeTokens()).toEqual([expect.objectContaining({ stateId: 'A', status: 'waiting' })]);
         });
 
     });
@@ -684,7 +720,7 @@ describe('Instance', () => {
             expect(onRun).toHaveBeenCalledTimes(7);
         });
 
-        it('runs until onCheckResult passes, up to the retry limit', async () => {
+        it('runs until `onCheckResult` passes, up to the retry limit', async () => {
             const onRun = vi.fn();
             let attempts = 0;
             const workflow = buildSingleStateWorkflow('auto');
@@ -701,11 +737,32 @@ describe('Instance', () => {
         it('uses state retry option instead of the default', async () => {
             const onRun = vi.fn();
             const workflow = buildSingleStateWorkflow('auto');
-            workflow.states.A.onRun(onRun).onCheckResult(() => false, { retries: 2 });
+            workflow.states.A.onRun(onRun, { retries: 2 }).onCheckResult(() => false);
             const instance = workflow.instantiate({});
 
             await expect(instance.start('A')).rejects.toThrow(InstanceFailureError);
             expect(onRun).toHaveBeenCalledTimes(2);
+        });
+
+        it('rejects a default retry limit or cascade visit limit that is not a positive integer when instantiating', () => {
+            const workflow = buildSingleStateWorkflow('auto');
+
+            expect(() => workflow.instantiate({}, { defaultRetryLimit: 0 })).toThrow(RangeError);
+            expect(() => workflow.instantiate({}, { cascadeVisitLimit: 1.5 })).toThrow(RangeError);
+        });
+
+        it('retries a throwing `onRun` until an attempt succeeds', async () => {
+            let attempts = 0;
+            const workflow = buildSingleStateWorkflow('auto');
+            workflow.states.A.onRun(() => {
+                if (++attempts < 3) throw new Error('boom');
+            });
+            const instance = workflow.instantiate({});
+
+            await instance.start('A');
+
+            expect(attempts).toBe(3);
+            expect(instance.isCompleted).toBe(true);
         });
 
     });
@@ -722,9 +779,53 @@ describe('Instance', () => {
 
             await instance.start('Begin');
 
-            expect(onRunB).not.toHaveBeenCalled();
-            expect(onRunC).not.toHaveBeenCalled();
+            expect(onRunB).toHaveBeenCalledTimes(1);
+            expect(onRunC).toHaveBeenCalledTimes(1);
             expect(instance.activeStateIds().sort()).toEqual(['B', 'C']);
+        });
+
+    });
+
+    describe('reaching timeout on an `onRun`', () => {
+
+        it('will not wait forever if `onRun` never returns', async () => {
+            const workflow = buildLinearWorkflow('auto', 'auto');
+            workflow.states['A'].onRun(() => new Promise<void>(() => {}));
+            const instance = workflow.instantiate({}, { defaultHandlerTimeout: 50, defaultRetryLimit: 1 });
+
+            await expect(instance.start('A')).rejects.toThrow(InstanceFailureError);
+            expect(instance.activeTokens()).toEqual([expect.objectContaining({ stateId: 'A', status: 'failed' })]);
+            expect(instance.isActive('B')).toBe(false);
+        });
+
+        it('aborts the signal given to `onRun` once it times out', async () => {
+            let signal: AbortSignal | undefined;
+            const workflow = buildSingleStateWorkflow('auto');
+            workflow.states.A.onRun((_context, given) => {
+                signal = given;
+                return new Promise<void>(() => {});
+            });
+            const instance = workflow.instantiate({}, { defaultHandlerTimeout: 50, defaultRetryLimit: 1 });
+
+            await expect(instance.start('A')).rejects.toThrow(InstanceFailureError);
+
+            expect(signal?.aborted).toBe(true);
+        });
+
+        it('rejects an invalid default handler timeout when instantiating', () => {
+            const workflow = buildSingleStateWorkflow('auto');
+
+            expect(() => workflow.instantiate({}, { defaultHandlerTimeout: Number.MAX_SAFE_INTEGER })).toThrow(RangeError);
+        });
+
+        it('does not time out with a default handler timeout of 0', async () => {
+            const workflow = buildSingleStateWorkflow('auto');
+            workflow.states.A.onRun(() => new Promise<void>(resolve => setTimeout(resolve, 30)));
+            const instance = workflow.instantiate({}, { defaultHandlerTimeout: 0, defaultRetryLimit: 1 });
+
+            await instance.start('A');
+
+            expect(instance.isCompleted).toBe(true);
         });
 
     });
